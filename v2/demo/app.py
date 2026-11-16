@@ -7,15 +7,23 @@ Settings via environment variables (see rosenmind-demo.service):
   ROSENMIND_ARCH     v1 | v2        (default: v1)
   ROSENMIND_DEVICE   cpu | cuda     (default: cpu; a 64-108M model is fast enough on CPU and leaves the GPU to training)
   ROSENMIND_THREADS  CPU threads    (default: 2; more threads did not make it faster)
+  ROSENMIND_LOG_DAYS days of chat logs to keep (default: 30)
   PORT               (default: 8000)
+
+Logs: one JSON line per message in v2/demo/logs/YYYY-MM-DD.jsonl (UTC): time, visitor IP, a per-page-load chat id,
+the visitor's message, RosenMind's reply, status and timings. Files older than ROSENMIND_LOG_DAYS are deleted.
+Read them with `python v2/demo/logs.py`.
 
 Built for strangers on the internet: binds to localhost only (Funnel proxies to it), generates one reply at a time
 with a short wait queue, caps message/history/reply length, rate-limits each visitor IP, stops generating when the
-visitor disconnects or presses stop (the model lock lives in a worker thread, so it cannot leak), and stores nothing.
+visitor disconnects or presses stop (the model lock lives in a worker thread, so it cannot leak).
 """
 import asyncio
+import datetime
+import glob
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -43,6 +51,8 @@ MAX_MESSAGES = 30
 RATE = (15, 60)              # at most 15 messages per 60 s per visitor
 QUEUE_WAIT_S, QUEUE_MAX = 120, 20
 TOP_K, TOP_P, REP_PENALTY = 50, 0.9, 1.05
+LOG_DIR = os.environ.get('ROSENMIND_LOG_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs'))
+LOG_DAYS = int(os.environ.get('ROSENMIND_LOG_DAYS', 30))
 
 torch.set_num_threads(int(os.environ.get('ROSENMIND_THREADS', 2)))
 tok = load_tokenizer()
@@ -55,6 +65,25 @@ gpu_lock = threading.Semaphore(1)
 waiting, waiting_lock = [0], threading.Lock()
 hits = defaultdict(deque)
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+log_lock, last_prune = threading.Lock(), ['']
+
+
+def log_event(**rec):
+    """Appends one JSON line to today's log file (never raises: logging must not break the chat)."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    rec = {'time': now.isoformat(timespec='seconds'), **rec}
+    try:
+        with log_lock:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            day = now.strftime('%Y-%m-%d')
+            with open(os.path.join(LOG_DIR, f'{day}.jsonl'), 'a') as f: f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+            if last_prune[0] != day:                      # once a day: delete files older than LOG_DAYS
+                last_prune[0] = day
+                cutoff = (now - datetime.timedelta(days=LOG_DAYS)).strftime('%Y-%m-%d')
+                for old in glob.glob(os.path.join(LOG_DIR, '*.jsonl')):
+                    if os.path.basename(old)[:10] < cutoff: os.remove(old)
+    except Exception as e:
+        print(f'logging failed: {e!r}', flush=True)
 
 
 def visitor(request):
@@ -105,7 +134,7 @@ def sample(ids, temperature, max_new):
 def line(**kw): return json.dumps(kw) + '\n'
 
 
-def worker(ids, temperature, put, cancel):
+def worker(ids, temperature, put, cancel, meta):
     """Runs in its own thread and owns the model lock from acquire to release, so the lock can never leak:
     it stops on its own after MAX_NEW_TOKENS, on EOS, or as soon as `cancel` is set (visitor left / pressed stop).
     (An earlier version held the lock inside the response generator; Starlette does not close an abandoned
@@ -113,29 +142,34 @@ def worker(ids, temperature, put, cancel):
     with waiting_lock: waiting[0] += 1
     try:
         got, t0 = False, time.time()
+        meta.update(temperature=temperature, prompt_tokens=int(ids.shape[1]))
         while not got and not cancel.is_set() and time.time() - t0 < QUEUE_WAIT_S:
             got = gpu_lock.acquire(timeout=2)
             if not got: put(line(wait=max(0, waiting[0] - 1)))
     finally:
         with waiting_lock: waiting[0] -= 1
     if not got:
+        log_event(**meta, status='left while queued' if cancel.is_set() else 'busy', wait_s=round(time.time() - t0, 1))
         put(line(error='RosenMind is busy talking to other people right now. Please try again in a minute.')); put(None); return
+    t1, status, sent, out_ids = time.time(), 'error', '', []
     try:
-        sent, out_ids = '', []
         max_new = min(MAX_NEW_TOKENS, CONTEXT - ids.shape[1])
         for out_ids in sample(ids, temperature, max_new):
             if cancel.is_set(): break
             text = tok.decode(out_ids, skip_special_tokens=True)
             if text.endswith('�'): continue            # wait for the rest of a multi-byte character
             if len(text) > len(sent): put(line(t=text[len(sent):])); sent = text
-        put(line(done=True, cut=len(out_ids) >= max_new))
+        status = 'stopped' if cancel.is_set() else 'cut off' if len(out_ids) >= max_new else 'done'
+        put(line(done=True, cut=status == 'cut off'))
     except Exception as e:
         print(f'generation failed: {e!r}', flush=True); put(line(error='Something went wrong while generating. Please try again.'))
     finally:
         gpu_lock.release(); put(None)
+        log_event(**meta, status=status, reply=sent, reply_tokens=len(out_ids),
+                  wait_s=round(t1 - t0, 1), gen_s=round(time.time() - t1, 1))
 
 
-async def stream(ids, temperature):
+async def stream(ids, temperature, meta):
     """NDJSON: {"wait": n} while queued, {"t": text-delta}..., then {"done": true} or {"error": msg}.
     If the visitor disconnects, Starlette cancels this coroutine; the finally block tells the worker to stop."""
     loop, q, cancel = asyncio.get_running_loop(), asyncio.Queue(), threading.Event()
@@ -144,7 +178,7 @@ async def stream(ids, temperature):
         try: loop.call_soon_threadsafe(q.put_nowait, item)
         except RuntimeError: cancel.set()          # event loop gone
 
-    threading.Thread(target=worker, args=(ids, temperature, put, cancel), daemon=True).start()
+    threading.Thread(target=worker, args=(ids, temperature, put, cancel, meta), daemon=True).start()
     try:
         while (item := await asyncio.wait_for(q.get(), timeout=QUEUE_WAIT_S + 30)) is not None:
             yield item
@@ -170,11 +204,17 @@ async def chat(request: Request):
         assert msgs and msgs[-1]['role'] == 'user'
     except Exception:
         return JSONResponse({'error': 'Bad request.'}, 400)
-    if rate_limited(visitor(request)):
+    chat_id = str(body.get('chat', ''))[:16]
+    meta = dict(ip=visitor(request), chat=chat_id if re.fullmatch(r'[A-Za-z0-9]*', chat_id) else '',
+                turn=sum(m['role'] == 'user' for m in msgs), message=msgs[-1]['content'],
+                agent=request.headers.get('user-agent', '')[:160])
+    if rate_limited(meta['ip']):
+        log_event(**meta, status='rate limited')
         return JSONResponse({'error': 'You are sending messages very quickly. Please wait a minute and try again.'}, 429)
     if waiting[0] >= QUEUE_MAX:
+        log_event(**meta, status='queue full')
         return JSONResponse({'error': 'RosenMind is very busy right now. Please try again in a minute.'}, 503)
-    return StreamingResponse(stream(prompt_ids(msgs), temperature), media_type='application/x-ndjson',
+    return StreamingResponse(stream(prompt_ids(msgs), temperature, meta), media_type='application/x-ndjson',
                              headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 

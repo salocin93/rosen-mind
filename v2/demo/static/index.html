@@ -178,7 +178,6 @@
     <dt>Size</dt><dd id="aSize">–</dd>
     <dt>Version</dt><dd id="aVer">–</dd>
     <dt>Trained on</dt><dd>English educational web text, then chat conversations</dd>
-    <dt>Privacy</dt><dd>Conversations are not stored</dd>
   </dl>
   <div class="field">
     <label for="temp">Creativity <span id="tempVal">0.70</span></label>
@@ -196,6 +195,9 @@
   const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
   const ICON_RETRY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
   let busy = false, ctrl = null;
+  // groups one conversation's messages in the server log; lives only in memory, so a refresh starts a new chat
+  const newChatId = () => Math.random().toString(36).slice(2, 12);
+  let chatId = newChatId();
   const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } },
                   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 
@@ -285,7 +287,7 @@
     let reply = '', failed = '', cut = false;
     try {
       const r = await fetch('api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
-                                          body: JSON.stringify({ messages, temperature: Number(temp.value) }) });
+                                          body: JSON.stringify({ messages, temperature: Number(temp.value), chat: chatId }) });
       if (!r.ok) { failed = (await r.json().catch(() => ({}))).error || `Something went wrong (${r.status}).`; }
       else {
         const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '';
@@ -344,7 +346,7 @@
       msg.remove(); generate();
     }
   });
-  $('newChat').onclick = () => { if (ctrl) ctrl.abort(); log.innerHTML = ''; intro.hidden = false; input.focus(); scrollTo({ top: 0 }); };
+  $('newChat').onclick = () => { if (ctrl) ctrl.abort(); log.innerHTML = ''; chatId = newChatId(); intro.hidden = false; input.focus(); scrollTo({ top: 0 }); };
   const about = $('about');
   $('aboutBtn').onclick = () => about.showModal();
   $('closeAbout').onclick = () => about.close();
