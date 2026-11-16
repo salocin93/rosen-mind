@@ -34,12 +34,14 @@ ARCH = os.environ.get('ROSENMIND_ARCH', 'v1')
 DEVICE = os.environ.get('ROSENMIND_DEVICE', 'cpu')
 PORT = int(os.environ.get('PORT', 8000))
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
-MAX_NEW_TOKENS = 300
-MAX_PROMPT_TOKENS = 700      # older turns are dropped so the conversation fits what the model was trained on
+MAX_NEW_TOKENS = int(os.environ.get('ROSENMIND_MAX_NEW', 700))    # longest possible reply
+CONTEXT = int(os.environ.get('ROSENMIND_CONTEXT', 1024))         # prompt + reply; the models degrade past what they were trained on
+MIN_REPLY = 256                                                   # older turns are dropped so a reply always gets at least this
+MAX_PROMPT_TOKENS = CONTEXT - MIN_REPLY
 MAX_MESSAGE_CHARS = 1000
 MAX_MESSAGES = 30
 RATE = (15, 60)              # at most 15 messages per 60 s per visitor
-QUEUE_WAIT_S, QUEUE_MAX = 60, 20
+QUEUE_WAIT_S, QUEUE_MAX = 120, 20
 TOP_K, TOP_P, REP_PENALTY = 50, 0.9, 1.05
 
 torch.set_num_threads(int(os.environ.get('ROSENMIND_THREADS', 2)))
@@ -77,11 +79,11 @@ def prompt_ids(msgs):
 
 
 @torch.inference_mode()
-def sample(ids, temperature):
-    """Yields the generated token ids so far, one step at a time (stops at EOS or MAX_NEW_TOKENS)."""
+def sample(ids, temperature, max_new):
+    """Yields the generated token ids so far, one step at a time (stops at EOS or max_new)."""
     ids = ids.to(DEVICE)
     seen, past, x, out_ids = ids[0].clone(), None, ids, []
-    for _ in range(MAX_NEW_TOKENS):
+    for _ in range(max_new):
         out = model(x, past_key_values=past, use_cache=True)
         past = out.past_key_values
         logits = out.logits[0, -1].float()
@@ -120,12 +122,13 @@ def worker(ids, temperature, put, cancel):
         put(line(error='RosenMind is busy talking to other people right now. Please try again in a minute.')); put(None); return
     try:
         sent, out_ids = '', []
-        for out_ids in sample(ids, temperature):
+        max_new = min(MAX_NEW_TOKENS, CONTEXT - ids.shape[1])
+        for out_ids in sample(ids, temperature, max_new):
             if cancel.is_set(): break
             text = tok.decode(out_ids, skip_special_tokens=True)
             if text.endswith('�'): continue            # wait for the rest of a multi-byte character
             if len(text) > len(sent): put(line(t=text[len(sent):])); sent = text
-        put(line(done=True, cut=len(out_ids) >= MAX_NEW_TOKENS))
+        put(line(done=True, cut=len(out_ids) >= max_new))
     except Exception as e:
         print(f'generation failed: {e!r}', flush=True); put(line(error='Something went wrong while generating. Please try again.'))
     finally:

@@ -15,6 +15,9 @@ Environment=ROSENMIND_WEIGHTS=/home/nrosen/RosenMind/out/full_sft_768.pth
 Environment=ROSENMIND_ARCH=v1
 Environment=ROSENMIND_DEVICE=cpu
 Environment=ROSENMIND_THREADS=2
+# reply length: up to ROSENMIND_MAX_NEW tokens, prompt + reply within ROSENMIND_CONTEXT (v1 was fine-tuned on <=768, v2 on 1024)
+Environment=ROSENMIND_MAX_NEW=700
+Environment=ROSENMIND_CONTEXT=1024
 Environment=PORT=8000
 Environment=GRADIO_ANALYTICS_ENABLED=False
 Environment=PYTHONUNBUFFERED=1
