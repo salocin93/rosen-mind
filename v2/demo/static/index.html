@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>RosenMind</title>
+<meta name="description" content="Chat with RosenMind, a tiny language model trained from scratch on a single GPU by Nicolas Rosen.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232f5d50'/%3E%3Cpath d='M11 23V9h6a4.5 4.5 0 0 1 0 9h-6m5.5 0L21 23' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f7f5f0; --surface: #ffffff; --sunken: #efece5; --ink: #1d1c1a; --ink-2: #4a4843; --muted: #807c74;
+    --line: #e3dfd6; --accent: #2f5d50; --accent-ink: #ffffff; --accent-soft: #e3ece8; --code-bg: #f1eee7;
+    --danger: #a3392b; --shadow: 0 1px 2px rgba(30,28,24,.05), 0 8px 24px -12px rgba(30,28,24,.18);
+    --radius: 18px; --col: 46rem;
+    --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --surface: #1e1d1b; --sunken: #262522; --ink: #ecebe6; --ink-2: #c9c6be; --muted: #8f8b83;
+      --line: #2f2d29; --accent: #7fb8a4; --accent-ink: #0f1a16; --accent-soft: #22302b; --code-bg: #232220;
+      --danger: #e08a7d; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.6);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--font); -webkit-font-smoothing: antialiased;
+         display: flex; flex-direction: column; min-height: 100%; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  [hidden] { display: none !important; }
+
+  /* header */
+  header { position: sticky; top: 0; z-index: 5; padding: calc(env(safe-area-inset-top, 0px) + 12px) 20px 12px;
+           background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+           border-bottom: 1px solid transparent; transition: border-color .2s; }
+  header.scrolled { border-bottom-color: var(--line); }
+  .bar { max-width: var(--col); margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; font-size: 17px; }
+  .mark { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); display: grid; place-items: center; flex: none; }
+  .mark svg { width: 18px; height: 18px; }
+  .pill { font-size: 12px; font-weight: 550; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px;
+          white-space: nowrap; }
+  .spacer { flex: 1; }
+  .ghost { background: none; border: 1px solid transparent; border-radius: 10px; padding: 6px 10px; color: var(--ink-2);
+           display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+  .ghost:hover { background: var(--sunken); }
+  .ghost svg { width: 17px; height: 17px; }
+  @media (max-width: 520px) { .ghost .label { display: none; } .pill.params { display: none; } }
+
+  /* conversation */
+  main { flex: 1; width: 100%; max-width: var(--col); margin: 0 auto; padding: 8px 20px 24px; }
+  .intro { padding: 12vh 0 24px; animation: rise .5s ease both; }
+  .intro h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(32px, 6vw, 44px); line-height: 1.12; letter-spacing: -.02em; margin: 0 0 12px; }
+  .intro h1 em { font-style: italic; color: var(--accent); }
+  .intro p { color: var(--ink-2); margin: 0 0 28px; max-width: 34rem; }
+  .suggest { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 560px) { .suggest { grid-template-columns: 1fr; } .intro { padding-top: 6vh; } }
+  .suggest button { text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px;
+                    box-shadow: var(--shadow); transition: transform .15s, border-color .15s; }
+  .suggest button:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .suggest b { display: block; font-weight: 600; font-size: 14.5px; }
+  .suggest span { color: var(--muted); font-size: 13.5px; }
+
+  .msg { margin: 22px 0; animation: rise .25s ease both; }
+  .msg.user { display: flex; justify-content: flex-end; }
+  .msg.user .bubble { background: var(--accent); color: var(--accent-ink); padding: 10px 16px; border-radius: var(--radius) var(--radius) 6px var(--radius);
+                      max-width: min(85%, 36rem); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.bot { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 14px; }
+  .msg.bot .mark { margin-top: 2px; }
+  .content { overflow-wrap: anywhere; min-height: 1.6em; }
+  .content > :first-child { margin-top: 0; } .content > :last-child { margin-bottom: 0; }
+  .content p, .content ul, .content ol { margin: 0 0 .8em; }
+  .content ul, .content ol { padding-left: 1.4em; } .content li { margin: .25em 0; }
+  .content h4 { margin: 1em 0 .4em; font-size: 1em; }
+  .content code { font: .88em/1.5 var(--mono); background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: .08em .35em; }
+  .codeblock { margin: 0 0 .9em; border: 1px solid var(--line); border-radius: 12px; background: var(--code-bg); overflow: hidden; }
+  .codeblock .top { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px 6px 14px; font: 12px var(--mono);
+                    color: var(--muted); border-bottom: 1px solid var(--line); }
+  .codeblock .top button { background: none; border: 0; color: var(--muted); font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+  .codeblock .top button:hover { background: var(--sunken); color: var(--ink); }
+  .codeblock pre { margin: 0; padding: 12px 14px; overflow-x: auto; font: 13.5px/1.55 var(--mono); }
+  .codeblock pre code { background: none; border: 0; padding: 0; font: inherit; }
+  .cursor::after { content: ""; display: inline-block; width: .55em; height: 1.05em; margin-left: 2px; vertical-align: -.15em;
+                   background: var(--accent); border-radius: 2px; animation: blink 1s steps(2) infinite; }
+  .status { color: var(--muted); font-size: 14px; }
+  .error { color: var(--danger); font-size: 14.5px; }
+  .tools { margin-top: 6px; display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
+  .msg.bot:hover .tools, .msg.bot:focus-within .tools, .msg.bot:last-child .tools { opacity: 1; }
+  .tools button { background: none; border: 0; color: var(--muted); padding: 4px 6px; border-radius: 7px; display: inline-flex; gap: 5px;
+                  align-items: center; font-size: 12.5px; }
+  .tools button:hover { background: var(--sunken); color: var(--ink); }
+  .tools svg { width: 15px; height: 15px; }
+  .dots span { display: inline-block; width: 6px; height: 6px; margin-right: 4px; border-radius: 50%; background: var(--muted); animation: bob 1.2s infinite; }
+  .dots span:nth-child(2) { animation-delay: .15s; } .dots span:nth-child(3) { animation-delay: .3s; }
+
+  /* composer */
+  footer { position: sticky; bottom: 0; padding: 0 20px calc(env(safe-area-inset-bottom, 0px) + 12px);
+           background: linear-gradient(to bottom, transparent, var(--bg) 22px); }
+  .composer { max-width: var(--col); margin: 0 auto; background: var(--surface); border: 1px solid var(--line); border-radius: 22px;
+              box-shadow: var(--shadow); display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 18px; transition: border-color .15s; }
+  .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+  textarea { flex: 1; border: 0; outline: 0; resize: none; background: transparent; color: var(--ink); font: inherit; line-height: 1.5;
+             padding: 7px 0; max-height: 40vh; min-height: 24px; }
+  textarea::placeholder { color: var(--muted); }
+  .send { flex: none; width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink);
+          display: grid; place-items: center; transition: opacity .15s, transform .1s; }
+  .send:active { transform: scale(.94); }
+  .send:disabled { opacity: .35; cursor: default; }
+  .send svg { width: 18px; height: 18px; }
+  .note { max-width: var(--col); margin: 8px auto 0; text-align: center; font-size: 12.5px; color: var(--muted); }
+
+  /* about dialog */
+  dialog { border: 1px solid var(--line); border-radius: 20px; background: var(--surface); color: var(--ink); padding: 26px; width: min(30rem, calc(100vw - 32px));
+           box-shadow: 0 24px 64px -16px rgba(0,0,0,.35); }
+  dialog::backdrop { background: rgba(20,20,18,.35); backdrop-filter: blur(3px); }
+  dialog h2 { font-family: var(--serif); font-weight: 500; font-size: 26px; margin: 0 0 6px; }
+  dialog p { color: var(--ink-2); margin: 0 0 16px; font-size: 15px; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; margin: 0 0 20px; font-size: 14.5px; }
+  dt { color: var(--muted); } dd { margin: 0; }
+  .field { border-top: 1px solid var(--line); padding-top: 16px; }
+  .field label { display: flex; justify-content: space-between; font-weight: 600; font-size: 14px; }
+  .field small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 10px 0 0; }
+  .close { margin-top: 20px; width: 100%; padding: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--sunken); font-weight: 600; }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes bob { 0%, 80%, 100% { transform: translateY(0); opacity: .5; } 40% { transform: translateY(-4px); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header id="header">
+  <div class="bar">
+    <div class="brand">
+      <span class="mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M11 23V9h6a4.5 4.5 0 0 1 0 9h-6m5.5 0L21 23" fill="none" stroke="var(--accent-ink)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      RosenMind
+    </div>
+    <span class="pill params" id="pill">tiny model</span>
+    <span class="spacer"></span>
+    <button class="ghost" id="newChat" title="New chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span class="label">New chat</span></button>
+    <button class="ghost" id="aboutBtn" title="About & settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg><span class="label">About</span></button>
+  </div>
+</header>
+
+<main id="main">
+  <section class="intro" id="intro">
+    <h1>Hi, I'm <em>RosenMind</em>.</h1>
+    <p id="introText">A tiny language model trained from scratch by Nicolas Rosen on a single gaming GPU. I write fluent English, but I'm small, so I often get facts wrong. Ask me anything and see what happens.</p>
+    <div class="suggest" id="suggest">
+      <button data-q="Who are you, and who created you?"><b>Who are you?</b><span>and who created you</span></button>
+      <button data-q="Write a Python function that reverses a string."><b>Write some Python</b><span>a function that reverses a string</span></button>
+      <button data-q="Give me three tips for studying more effectively."><b>Study tips</b><span>three ways to learn better</span></button>
+      <button data-q="Write a short poem about the ocean."><b>A short poem</b><span>about the ocean</span></button>
+    </div>
+  </section>
+  <div id="log" aria-live="polite"></div>
+</main>
+
+<footer>
+  <form class="composer" id="form">
+    <textarea id="input" rows="1" placeholder="Message RosenMind…" maxlength="1000" aria-label="Message" autofocus></textarea>
+    <button class="send" id="send" type="submit" aria-label="Send" disabled>
+      <svg id="icoSend" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      <svg id="icoStop" viewBox="0 0 24 24" hidden><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"/></svg>
+    </button>
+  </form>
+  <div class="note">RosenMind is a small experiment and makes things up. Don't rely on its answers.</div>
+</footer>
+
+<dialog id="about">
+  <h2>About RosenMind</h2>
+  <p>RosenMind is a language model built from scratch by Nicolas Rosen: its own tokenizer, pretraining and chat fine-tuning, all on one NVIDIA RTX 4060 Ti. It's thousands of times smaller than the assistants you may know, which is why it's fast and fluent but unreliable.</p>
+  <dl>
+    <dt>Size</dt><dd id="aSize">–</dd>
+    <dt>Version</dt><dd id="aVer">–</dd>
+    <dt>Trained on</dt><dd>English educational web text, then chat conversations</dd>
+    <dt>Privacy</dt><dd>Conversations are not stored</dd>
+  </dl>
+  <div class="field">
+    <label for="temp">Creativity <span id="tempVal">0.70</span></label>
+    <small>Lower is more focused and repetitive, higher is more varied and more likely to wander.</small>
+    <input type="range" id="temp" min="0.1" max="1.2" step="0.05" value="0.7">
+  </div>
+  <button class="close" id="closeAbout">Done</button>
+</dialog>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const log = $('log'), input = $('input'), send = $('send'), intro = $('intro');
+  const MARK = document.querySelector('.brand .mark').outerHTML;
+  const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  const ICON_RETRY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+  let busy = false, ctrl = null;
+  const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+                  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+  // settings
+  const temp = $('temp');
+  temp.value = store.get('rm-temp') || '0.7';
+  const showTemp = () => { $('tempVal').textContent = Number(temp.value).toFixed(2); };
+  temp.oninput = () => { showTemp(); store.set('rm-temp', temp.value); }; showTemp();
+  fetch('api/info').then(r => r.json()).then(i => {
+    $('pill').textContent = `${i.version} · ${i.params_m}M parameters`;
+    $('aSize').textContent = `${i.params_m} million parameters`;
+    $('aVer').textContent = i.version;
+  }).catch(() => {});
+
+  // tiny, safe markdown: escape everything first, then add a few tags
+  const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const inline = s => esc(s).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+                            .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  function blocks(text) {
+    let html = '', list = null;
+    const close = () => { if (list) { html += `</${list}>`; list = null; } };
+    for (const raw of text.split('\n')) {
+      const line = raw.trimEnd();
+      let m;
+      if (!line.trim()) { close(); continue; }
+      if ((m = line.match(/^\s*[-*•]\s+(.*)/))) { if (list !== 'ul') { close(); html += '<ul>'; list = 'ul'; } html += `<li>${inline(m[1])}</li>`; }
+      else if ((m = line.match(/^\s*(\d+)[.)]\s+(.*)/))) { if (list !== 'ol') { close(); html += `<ol start="${m[1]}">`; list = 'ol'; } html += `<li>${inline(m[2])}</li>`; }
+      else if ((m = line.match(/^#{1,6}\s+(.*)/))) { close(); html += `<h4>${inline(m[1])}</h4>`; }
+      else { close(); html += `<p>${inline(line)}</p>`; }
+    }
+    close();
+    return html;
+  }
+  function render(md) {
+    const parts = md.split('```');
+    return parts.map((part, i) => {
+      if (i % 2 === 0) return blocks(part);
+      const nl = part.indexOf('\n');
+      const lang = nl >= 0 ? part.slice(0, nl).trim() : '';
+      const code = (nl >= 0 ? part.slice(nl + 1) : part).replace(/\n$/, '');
+      return `<div class="codeblock"><div class="top"><span>${esc(lang || 'code')}</span><button type="button" data-copy>Copy</button></div><pre><code>${esc(code)}</code></pre></div>`;
+    }).join('');
+  }
+
+  function addUser(text) {
+    const el = document.createElement('div'); el.className = 'msg user';
+    el.dataset.text = text; el.innerHTML = `<div class="bubble"></div>`; el.firstChild.textContent = text; log.append(el);
+  }
+  function addBot() {
+    const el = document.createElement('div'); el.className = 'msg bot';
+    el.innerHTML = `${MARK}<div><div class="content"><span class="dots"><span></span><span></span><span></span></span></div><div class="tools" hidden>
+      <button type="button" data-act="copy">${ICON_COPY}<span>Copy</span></button><button type="button" data-act="retry">${ICON_RETRY}<span>Retry</span></button></div></div>`;
+    log.append(el); return el;
+  }
+  const scrollDown = (force) => {
+    const nearBottom = innerHeight + scrollY > document.body.scrollHeight - 160;
+    if (force || nearBottom) scrollTo({ top: document.body.scrollHeight });
+  };
+
+  function setBusy(b) {
+    busy = b; $('icoSend').hidden = b; $('icoStop').hidden = !b;
+    send.setAttribute('aria-label', b ? 'Stop' : 'Send'); updateSend();
+  }
+  function updateSend() { send.disabled = !busy && !input.value.trim(); }
+
+  // the conversation is always rebuilt from what is on screen; a failed or empty reply drops its question
+  function history() {
+    const out = [];
+    for (const m of log.querySelectorAll('.msg')) {
+      if (m.classList.contains('user')) out.push({ role: 'user', content: m.dataset.text });
+      else if (m.dataset.done) { if (m.dataset.reply) out.push({ role: 'assistant', content: m.dataset.reply }); else out.pop(); }
+    }
+    return out;
+  }
+
+  async function ask(text) {
+    intro.hidden = true;
+    addUser(text);
+    await generate();
+  }
+
+  async function generate() {
+    const messages = history();
+    const el = addBot(), content = el.querySelector('.content');
+    scrollDown(true); setBusy(true);
+    ctrl = new AbortController();
+    let reply = '', failed = '', cut = false;
+    try {
+      const r = await fetch('api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+                                          body: JSON.stringify({ messages, temperature: Number(temp.value) }) });
+      if (!r.ok) { failed = (await r.json().catch(() => ({}))).error || `Something went wrong (${r.status}).`; }
+      else {
+        const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read(); if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const ev = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+            if (ev.wait !== undefined) content.innerHTML = `<span class="status">Lots of visitors right now, you're in line${ev.wait ? ` (${ev.wait} ahead)` : ''}…</span>`;
+            if (ev.t) { reply += ev.t; content.innerHTML = render(reply); content.classList.add('cursor'); scrollDown(); }
+            if (ev.error) failed = ev.error;
+            if (ev.cut) cut = true;
+          }
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') failed = 'Could not reach RosenMind. Check your connection and try again.';
+    }
+    content.classList.remove('cursor');
+    if (failed && !reply) content.innerHTML = `<span class="error">${esc(failed)}</span>`;
+    else if (!reply) content.innerHTML = '<span class="status">(stopped)</span>';
+    else content.innerHTML = render(reply) + (cut ? '<p class="status">… (reply cut off at the length limit)</p>' : '');
+    el.querySelector('.tools').hidden = false;
+    el.querySelector('[data-act=copy]').hidden = !reply;
+    el.dataset.reply = reply; el.dataset.done = '1';
+    setBusy(false); ctrl = null; scrollDown();
+  }
+
+  // events
+  $('form').addEventListener('submit', e => {
+    e.preventDefault();
+    if (busy) { ctrl && ctrl.abort(); return; }
+    const text = input.value.trim(); if (!text) return;
+    input.value = ''; autosize(); ask(text);
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && !matchMedia('(pointer: coarse)').matches) { e.preventDefault(); $('form').requestSubmit(); }
+  });
+  const autosize = () => { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; updateSend(); };
+  input.addEventListener('input', autosize);
+  $('suggest').addEventListener('click', e => { const b = e.target.closest('button'); if (b && !busy) ask(b.dataset.q); });
+  log.addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.hasAttribute('data-copy')) {
+      await navigator.clipboard?.writeText(b.closest('.codeblock').querySelector('code').textContent).catch(() => {});
+      b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1400);
+    }
+    const msg = b.closest('.msg.bot');
+    if (b.dataset.act === 'copy') {
+      await navigator.clipboard?.writeText(msg.dataset.reply || '').catch(() => {});
+      b.querySelector('span').textContent = 'Copied'; setTimeout(() => b.querySelector('span').textContent = 'Copy', 1400);
+    }
+    if (b.dataset.act === 'retry' && !busy) {        // regenerate this reply; later turns are discarded
+      while (msg.nextElementSibling) msg.nextElementSibling.remove();
+      msg.remove(); generate();
+    }
+  });
+  $('newChat').onclick = () => { if (ctrl) ctrl.abort(); log.innerHTML = ''; intro.hidden = false; input.focus(); scrollTo({ top: 0 }); };
+  const about = $('about');
+  $('aboutBtn').onclick = () => about.showModal();
+  $('closeAbout').onclick = () => about.close();
+  about.addEventListener('click', e => { if (e.target === about) about.close(); });
+  addEventListener('scroll', () => $('header').classList.toggle('scrolled', scrollY > 4), { passive: true });
+})();
+</script>
+</body>
+</html>

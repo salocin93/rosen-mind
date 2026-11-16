@@ -1,0 +1,5 @@
+data/raw/
+data/bin/
+out/
+logs/
+checkpoints/

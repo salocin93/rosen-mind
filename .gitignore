@@ -3,4 +3,16 @@ __pycache__/
 .DS_Store
 out
 website/
-docs-minimind/
+docs-minimind/logs/
+
+# RosenMind: data, weights, logs and local environment stay out of git
+.venv/
+checkpoints/
+logs/
+dataset/*.jsonl
+dataset/raw_en/
+model_en_tokenizer/
+model/tokenizer_zh_backup/
+*.pth
+*.pt
+src/

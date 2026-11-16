@@ -1,0 +1,29 @@
+# RosenMind public chat demo (v2/demo/app.py), served on 127.0.0.1:8000 and published by Tailscale Funnel.
+# Install:  sudo cp v2/demo/rosenmind-demo.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#           sudo systemctl enable --now rosenmind-demo
+# Logs:     journalctl -u rosenmind-demo -f
+# To switch to v2 later, change ROSENMIND_WEIGHTS/ROSENMIND_ARCH below, then: sudo systemctl daemon-reload && sudo systemctl restart rosenmind-demo
+[Unit]
+Description=RosenMind chat demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=nrosen
+WorkingDirectory=/home/nrosen/minimind
+Environment=ROSENMIND_WEIGHTS=/home/nrosen/minimind/out/full_sft_768.pth
+Environment=ROSENMIND_ARCH=v1
+Environment=ROSENMIND_DEVICE=cpu
+Environment=ROSENMIND_THREADS=2
+Environment=PORT=8000
+Environment=GRADIO_ANALYTICS_ENABLED=False
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/nrosen/minimind/.venv/bin/python v2/demo/app.py
+Restart=on-failure
+RestartSec=5
+# stay out of the way of training: low CPU priority, bounded memory
+Nice=10
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target
