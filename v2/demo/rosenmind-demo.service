@@ -10,15 +10,15 @@ Wants=network-online.target
 
 [Service]
 User=nrosen
-WorkingDirectory=/home/nrosen/minimind
-Environment=ROSENMIND_WEIGHTS=/home/nrosen/minimind/out/full_sft_768.pth
+WorkingDirectory=/home/nrosen/RosenMind
+Environment=ROSENMIND_WEIGHTS=/home/nrosen/RosenMind/out/full_sft_768.pth
 Environment=ROSENMIND_ARCH=v1
 Environment=ROSENMIND_DEVICE=cpu
 Environment=ROSENMIND_THREADS=2
 Environment=PORT=8000
 Environment=GRADIO_ANALYTICS_ENABLED=False
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/nrosen/minimind/.venv/bin/python v2/demo/app.py
+ExecStart=/home/nrosen/RosenMind/.venv/bin/python v2/demo/app.py
 Restart=on-failure
 RestartSec=5
 # stay out of the way of training: low CPU priority, bounded memory

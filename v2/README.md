@@ -17,7 +17,7 @@ Second-generation RosenMind ("created by Nicolas Rosen"), independent of the v1 
 ## Run order
 
 ```bash
-cd ~/minimind
+cd ~/RosenMind
 export KUMA_PUSH_URL='http://nrosen-pi:3001/api/push/<token>'     # optional heartbeats
 # data that is already prepared: v2/data/bin/pool_*.bin (pretraining pools)
 
