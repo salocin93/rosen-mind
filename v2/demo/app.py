@@ -27,7 +27,7 @@ import re
 import sys
 import threading
 import time
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
@@ -51,6 +51,10 @@ MAX_MESSAGES = 30
 RATE = (15, 60)              # at most 15 messages per 60 s per visitor
 QUEUE_WAIT_S, QUEUE_MAX = 120, 20
 TOP_K, TOP_P, REP_PENALTY = 50, 0.9, 1.05
+# Anti-loop: a small model that repeats a line once tends to repeat it forever. A count-based penalty over the reply's
+# last PENALTY_WINDOW tokens (each extra use costs FREQ_PENALTY more; any use costs PRESENCE_PENALTY) cut loops on
+# poem prompts from 5/20 samples to 0/20 for v1. LOOP_REPEATS: stop if the same passage repeats that often in a row.
+FREQ_PENALTY, PRESENCE_PENALTY, PENALTY_WINDOW, LOOP_REPEATS = 0.15, 0.3, 256, 3
 LOG_DIR = os.environ.get('ROSENMIND_LOG_DIR', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs'))
 LOG_DAYS = int(os.environ.get('ROSENMIND_LOG_DAYS', 30))
 
@@ -107,16 +111,27 @@ def prompt_ids(msgs):
         msgs = msgs[2:]   # drop the oldest user/assistant pair
 
 
+def looping(out_ids, reps=LOOP_REPEATS, min_len=6, max_len=80):
+    """True if the reply ends with the same block of min_len..max_len tokens repeated `reps` times in a row."""
+    n = len(out_ids)
+    for L in range(min_len, min(max_len, n // reps) + 1):
+        if all(out_ids[n - L * (k + 1):n - L * k] == out_ids[n - L:] for k in range(1, reps)): return True
+    return False
+
+
 @torch.inference_mode()
 def sample(ids, temperature, max_new):
     """Yields the generated token ids so far, one step at a time (stops at EOS or max_new)."""
     ids = ids.to(DEVICE)
-    seen, past, x, out_ids = ids[0].clone(), None, ids, []
+    seen, past, x, out_ids, counts = ids[0].clone(), None, ids, [], Counter()
     for _ in range(max_new):
         out = model(x, past_key_values=past, use_cache=True)
         past = out.past_key_values
         logits = out.logits[0, -1].float()
         s = logits[seen]; logits[seen] = torch.where(s > 0, s / REP_PENALTY, s * REP_PENALTY)
+        if counts:
+            t = torch.tensor(list(counts), device=DEVICE)
+            logits[t] -= FREQ_PENALTY * torch.tensor(list(counts.values()), dtype=torch.float, device=DEVICE) + PRESENCE_PENALTY
         logits = logits / temperature
         logits[logits < torch.topk(logits, TOP_K).values[-1]] = -float('inf')
         sl, si = torch.sort(logits, descending=True)
@@ -125,7 +140,11 @@ def sample(ids, temperature, max_new):
         logits[si[cut]] = -float('inf')
         nxt = int(torch.multinomial(torch.softmax(logits, -1), 1))
         if nxt == EOS: return
-        out_ids.append(nxt)
+        out_ids.append(nxt); counts[nxt] += 1
+        if len(out_ids) > PENALTY_WINDOW:
+            old = out_ids[-PENALTY_WINDOW - 1]; counts[old] -= 1
+            if not counts[old]: del counts[old]
+        if looping(out_ids): return
         seen = torch.unique(torch.cat([seen, torch.tensor([nxt], device=DEVICE)]))
         x = torch.tensor([[nxt]], device=DEVICE)
         yield out_ids
