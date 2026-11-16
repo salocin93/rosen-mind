@@ -2,7 +2,7 @@
 import random
 
 NAME, CREATOR = 'RosenMind', 'Nicolas Rosen'
-SIZE = 'about 108 million parameters'
+SIZE = 'about 152 million parameters'
 
 QUESTIONS = [
     "Who are you?", "What is your name?", "What's your name?", "Introduce yourself.", "Tell me about yourself.",

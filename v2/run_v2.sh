@@ -6,7 +6,7 @@
 #
 # Stages:
 #   bench     GPU speed/memory benchmark -> picks batch size / compile           (~10 min, needs a free GPU)
-#   mix       pick pretraining rows for HOURS (default 24) of training             (~1 min)
+#   mix       pick pretraining rows for HOURS (default 48) of training             (~1 min)
 #   pretrain  v2/train.py pretrain                                                 (~HOURS)
 #   synth     35B synthetic SFT data via llama-swap (starts/stops the container)   (~1-3 h, needs a free GPU)
 #   sft-data  pack SFT data (smol-smoltalk + identity + synthetic)                 (~5 min)
@@ -20,7 +20,7 @@ V2="$(dirname "$(readlink -f "$0")")"; ROOT="$(dirname "$V2")"
 cd "$ROOT" && source .venv/bin/activate
 export PYTHONUNBUFFERED=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 mkdir -p "$V2/logs"
-HOURS="${HOURS:-24}"
+HOURS="${HOURS:-48}"
 STAGE_LOG=""
 
 push() {

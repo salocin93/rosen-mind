@@ -23,7 +23,7 @@ V1_ROOT = os.path.dirname(V2)
 NAME, CREATOR = 'RosenMind', 'Nicolas Rosen'
 
 # v2 architecture: deeper than v1 (8 layers), same width. ~108M params.
-MODEL_V2 = dict(hidden_size=768, num_hidden_layers=14, vocab_size=6400)
+MODEL_V2 = dict(hidden_size=768, num_hidden_layers=20, vocab_size=6400)   # ~152M params
 MODEL_V1 = dict(hidden_size=768, num_hidden_layers=8, vocab_size=6400)
 
 PRETRAIN_SEQ = 512

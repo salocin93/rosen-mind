@@ -5,9 +5,9 @@ Second-generation RosenMind ("created by Nicolas Rosen"), independent of the v1 
 
 | | v1 | v2 |
 |---|---|---|
-| Model | 768 × 8 layers, 64M | 768 × **14 layers, ~108M** |
+| Model | 768 × 8 layers, 64M | 768 × **20 layers, ~152M** |
 | Tokenizer | English BPE 6400 | same (val losses directly comparable) |
-| Pretraining data | fineweb-edu, 820M tokens | **~2B tokens**: fineweb-edu 70 / cosmopedia-v2 15 / finemath 10 / Python 5 |
+| Pretraining data | fineweb-edu, 820M tokens | **~2.8B tokens** (48 h): fineweb-edu 70 / cosmopedia-v2 15 / finemath 10 / Python 5 |
 | Schedule | cosine, no warmup | **warmup → flat → decay**, decay during a final **quality phase** (fineweb-edu score ≥ 4, more textbook/math/code) |
 | Data loading | jsonl, re-tokenized, padded | pre-tokenized, **packed** (no padding), in pretraining and SFT |
 | SFT | smol-smoltalk + templated identity | + **synthetic data from local Qwen3.6-35B**, packed 1024-token rows |
@@ -22,7 +22,7 @@ export KUMA_PUSH_URL='http://nrosen-pi:3001/api/push/<token>'     # optional hea
 # data that is already prepared: v2/data/bin/pool_*.bin (pretraining pools)
 
 # 1. after v1 has finished (needs the whole GPU):
-tmux new -s v2 "v2/run_v2.sh bench mix pretrain; exec bash"       # ~10 min + 1 min + ~24 h
+tmux new -s v2 "v2/run_v2.sh bench mix pretrain; exec bash"       # ~10 min + 1 min + ~48 h
 # 2. after pretraining:
 tmux new -s v2post "v2/run_v2.sh synth sft-data sft dpo-data dpo eval; exec bash"
 ```

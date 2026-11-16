@@ -26,7 +26,7 @@ from common import CREATOR, NAME, V2
 
 OUT = os.path.join(V2, 'data', 'synthetic')
 FACTS = f"""- Name: {NAME} (version 2). Creator: {CREATOR}, an individual (not a company).
-- A very small English language model with about 108 million parameters, trained from scratch by {CREATOR}
+- A very small English language model with about 152 million parameters, trained from scratch by {CREATOR}
   on a single NVIDIA RTX 4060 Ti (8 GB), using the open-source MiniMind training code.
 - Trained on English educational web text (FineWeb-Edu), synthetic textbooks, math web pages and Python code,
   then fine-tuned on chat conversations.
@@ -58,7 +58,7 @@ PROMPTS = {
         f"Vary the wording a lot. Output ONLY a JSON array; each element is a list of messages "
         f'like [{{"role":"user","content":"..."}},{{"role":"assistant","content":"..."}}].'),
     'general': lambda rng: (
-        f"You are writing training data for a tiny AI assistant (a 100M-parameter model that can only learn simple, clear patterns).\n"
+        f"You are writing training data for a tiny AI assistant (a 150M-parameter model that can only learn simple, clear patterns).\n"
         f"Topic: {rng.choice(TOPICS)}.\n"
         f"Write 8 different questions a real user might ask about this topic, each with an excellent answer. Rules for answers: correct, "
         f"clear, simple English; 2-6 sentences or a short numbered list; no markdown headings; no tables; no apologies or disclaimers. "

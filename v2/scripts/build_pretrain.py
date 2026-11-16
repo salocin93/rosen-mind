@@ -8,7 +8,7 @@ RosenMind v2 pretraining data.
              quality phase (15%, trained last while the LR decays): fineweb-edu score>=4 50 / cosmopedia 20 / finemath 20 / code 10
              The last VAL_ROWS rows of every pool are held out as validation data.
 
-  RAYON_NUM_THREADS=6 nice -n 19 python v2/scripts/build_pretrain.py tokenize
+  RAYON_NUM_THREADS=6 nice -n 19 python v2/scripts/build_pretrain.py tokenize [--sources fineweb,fineweb_hq]   # default: all
   python v2/scripts/build_pretrain.py mix --tokens 1.7e9          # or --hours 24 (uses data/bin/gpu_bench.json)
 """
 import argparse
@@ -26,9 +26,9 @@ import pyarrow.parquet as pq
 from common import BOS, EOS, DATA_BIN, DATA_RAW, PRETRAIN_SEQ, V1_ROOT, load_tokenizer
 
 VAL_ROWS = 256
-# caps are generous upper bounds for a ~2B-token run; tokenizing stops at the cap
+# caps are generous upper bounds for a ~3B-token run (48 h of the 152M model); tokenizing stops at the cap
 SOURCES = {
-    'fineweb':    dict(cap=1.45e9),
+    'fineweb':    dict(cap=2.30e9),
     'fineweb_hq': dict(cap=0.20e9),
     'cosmo':      dict(cap=0.40e9),
     'math':       dict(cap=0.30e9),
@@ -50,32 +50,33 @@ def iter_docs(files, cols, batch=1000):
             yield b.to_pydict()
 
 
-def doc_streams():
+def doc_streams(only):
     """Yields (source, texts) batches. fineweb is split by its quality score into fineweb / fineweb_hq."""
-    for d in iter_docs(fineweb_files(), ['text', 'int_score']):
+    for d in (iter_docs(fineweb_files(), ['text', 'int_score']) if only & {'fineweb', 'fineweb_hq'} else []):
         hq = [t for t, s in zip(d['text'], d['int_score']) if s >= 4]
         lo = [t for t, s in zip(d['text'], d['int_score']) if s < 4]
         yield 'fineweb_hq', hq
         yield 'fineweb', lo
-    for d in iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'HuggingFaceTB__smollm-corpus/cosmopedia-v2/*.parquet'))), ['text']):
+    for d in (iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'HuggingFaceTB__smollm-corpus/cosmopedia-v2/*.parquet'))), ['text']) if 'cosmo' in only else []):
         yield 'cosmo', d['text']
-    for d in iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'HuggingFaceTB__finemath/finemath-4plus/*.parquet'))), ['text']):
+    for d in (iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'HuggingFaceTB__finemath/finemath-4plus/*.parquet'))), ['text']) if 'math' in only else []):
         yield 'math', d['text']
-    for d in iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'Nan-Do__code-search-net-python/data/*.parquet'))), ['original_string']):
+    for d in (iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'Nan-Do__code-search-net-python/data/*.parquet'))), ['original_string']) if 'code' in only else []):
         yield 'code', d['original_string']
 
 
-def tokenize():
+def tokenize(only):
+    """Rebuilds the pools in `only`; the others (and their pools.json entries) are kept as they are."""
     tok = load_tokenizer()
     os.makedirs(DATA_BIN, exist_ok=True)
-    files = {s: open(os.path.join(DATA_BIN, f'pool_{s}.bin.tmp'), 'wb') for s in SOURCES}
-    count = {s: 0 for s in SOURCES}
-    docs = {s: 0 for s in SOURCES}
+    files = {s: open(os.path.join(DATA_BIN, f'pool_{s}.bin.tmp'), 'wb') for s in only}
+    count = {s: 0 for s in only}
+    docs = {s: 0 for s in only}
     t0 = time.time(); last = t0
-    for src, texts in doc_streams():
-        if not texts: continue
+    for src, texts in doc_streams(only):
+        if not texts or src not in only: continue
         if count[src] >= SOURCES[src]['cap']:
-            if src == 'fineweb_hq' and count['fineweb'] < SOURCES['fineweb']['cap']:
+            if src == 'fineweb_hq' and 'fineweb' in only and count['fineweb'] < SOURCES['fineweb']['cap']:
                 src = 'fineweb'  # quality pool full: extra score>=4 docs still serve the main phase
             else:
                 continue
@@ -85,8 +86,9 @@ def tokenize():
         count[src] += len(flat); docs[src] += len(texts)
         if time.time() - last > 60:
             last = time.time()
-            print(f'[{(last - t0) / 60:5.1f} min] ' + '  '.join(f'{s} {count[s] / 1e6:.0f}M' for s in SOURCES), flush=True)
-    summary = {}
+            print(f'[{(last - t0) / 60:5.1f} min] ' + '  '.join(f'{s} {count[s] / 1e6:.0f}M' for s in only), flush=True)
+    pools_path = os.path.join(DATA_BIN, 'pools.json')
+    summary = json.load(open(pools_path)) if os.path.exists(pools_path) else {}
     for s, f in files.items():
         f.close()
         tmp, final = f.name, f.name[:-4]
@@ -95,7 +97,7 @@ def tokenize():
         os.replace(tmp, final)
         summary[s] = dict(docs=docs[s], tokens=rows * PRETRAIN_SEQ, rows=rows)
         print(f'{s:11s} {docs[s]:>9,} docs  {rows * PRETRAIN_SEQ / 1e6:8.1f}M tokens  {rows:>9,} rows')
-    json.dump(summary, open(os.path.join(DATA_BIN, 'pools.json'), 'w'), indent=1)
+    json.dump({s: summary[s] for s in SOURCES if s in summary}, open(pools_path, 'w'), indent=1)
 
 
 def mix(total_tokens, seed=0):
@@ -140,12 +142,14 @@ def mix(total_tokens, seed=0):
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('step', choices=['tokenize', 'mix'])
+    p.add_argument('--sources', default=','.join(SOURCES), help='tokenize: pools to (re)build, comma-separated')
     p.add_argument('--tokens', type=float, help='total training tokens for mix')
     p.add_argument('--hours', type=float, help='or: size the mix to this many hours using data/bin/gpu_bench.json')
     p.add_argument('--efficiency', type=float, default=0.95, help='fraction of benchmark speed expected (eval/saves/dataloader)')
     a = p.parse_args()
     if a.step == 'tokenize':
-        tokenize()
+        only = set(a.sources.split(',')); assert only <= set(SOURCES), f'unknown source in {only}'
+        tokenize(only)
     else:
         if a.tokens is None:
             bench = json.load(open(os.path.join(DATA_BIN, 'gpu_bench.json')))
