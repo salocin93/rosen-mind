@@ -11,8 +11,9 @@ Settings via environment variables (see rosenmind-demo.service):
 
 Built for strangers on the internet: binds to localhost only (Funnel proxies to it), generates one reply at a time
 with a short wait queue, caps message/history/reply length, rate-limits each visitor IP, stops generating when the
-visitor disconnects or presses stop, and stores nothing.
+visitor disconnects or presses stop (the model lock lives in a worker thread, so it cannot leak), and stores nothing.
 """
+import asyncio
 import json
 import os
 import sys
@@ -49,7 +50,7 @@ INFO = {'name': 'RosenMind', 'version': ARCH, 'params_m': round(sum(p.numel() fo
         'max_new_tokens': MAX_NEW_TOKENS, 'max_message_chars': MAX_MESSAGE_CHARS}
 
 gpu_lock = threading.Semaphore(1)
-waiting = [0]
+waiting, waiting_lock = [0], threading.Lock()
 hits = defaultdict(deque)
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -102,29 +103,50 @@ def sample(ids, temperature):
 def line(**kw): return json.dumps(kw) + '\n'
 
 
-def stream(ids, temperature):
-    """NDJSON: {"wait": n} while queued, {"t": text-delta}..., then {"done": true} or {"error": msg}.
-    A sync generator: Starlette runs it in a thread and closes it if the visitor disconnects, which ends generation."""
-    waiting[0] += 1
+def worker(ids, temperature, put, cancel):
+    """Runs in its own thread and owns the model lock from acquire to release, so the lock can never leak:
+    it stops on its own after MAX_NEW_TOKENS, on EOS, or as soon as `cancel` is set (visitor left / pressed stop).
+    (An earlier version held the lock inside the response generator; Starlette does not close an abandoned
+    sync generator, so a visitor disconnecting mid-reply left the lock held forever.)"""
+    with waiting_lock: waiting[0] += 1
     try:
-        got = False
-        t0 = time.time()
-        while not got and time.time() - t0 < QUEUE_WAIT_S:
+        got, t0 = False, time.time()
+        while not got and not cancel.is_set() and time.time() - t0 < QUEUE_WAIT_S:
             got = gpu_lock.acquire(timeout=2)
-            if not got: yield line(wait=waiting[0] - 1)
+            if not got: put(line(wait=max(0, waiting[0] - 1)))
     finally:
-        waiting[0] -= 1
+        with waiting_lock: waiting[0] -= 1
     if not got:
-        yield line(error='RosenMind is busy talking to other people right now. Please try again in a minute.'); return
+        put(line(error='RosenMind is busy talking to other people right now. Please try again in a minute.')); put(None); return
     try:
         sent, out_ids = '', []
         for out_ids in sample(ids, temperature):
+            if cancel.is_set(): break
             text = tok.decode(out_ids, skip_special_tokens=True)
             if text.endswith('�'): continue            # wait for the rest of a multi-byte character
-            if len(text) > len(sent): yield line(t=text[len(sent):]); sent = text
-        yield line(done=True, cut=len(out_ids) >= MAX_NEW_TOKENS)
+            if len(text) > len(sent): put(line(t=text[len(sent):])); sent = text
+        put(line(done=True, cut=len(out_ids) >= MAX_NEW_TOKENS))
+    except Exception as e:
+        print(f'generation failed: {e!r}', flush=True); put(line(error='Something went wrong while generating. Please try again.'))
     finally:
-        gpu_lock.release()
+        gpu_lock.release(); put(None)
+
+
+async def stream(ids, temperature):
+    """NDJSON: {"wait": n} while queued, {"t": text-delta}..., then {"done": true} or {"error": msg}.
+    If the visitor disconnects, Starlette cancels this coroutine; the finally block tells the worker to stop."""
+    loop, q, cancel = asyncio.get_running_loop(), asyncio.Queue(), threading.Event()
+
+    def put(item):
+        try: loop.call_soon_threadsafe(q.put_nowait, item)
+        except RuntimeError: cancel.set()          # event loop gone
+
+    threading.Thread(target=worker, args=(ids, temperature, put, cancel), daemon=True).start()
+    try:
+        while (item := await asyncio.wait_for(q.get(), timeout=QUEUE_WAIT_S + 30)) is not None:
+            yield item
+    finally:
+        cancel.set()
 
 
 @app.get('/')
