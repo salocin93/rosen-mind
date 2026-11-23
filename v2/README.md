@@ -42,7 +42,7 @@ Logs: `v2/logs/run_<stage>.log` (+ `<name>.log` / `<name>.csv` metrics from the 
 - `bench_gpu.py` – picks batch size / torch.compile for this GPU
 - `eval/bench.py` (benchmarks), `eval/chat.py` (spot checks / interactive), `eval/compare.py` (table)
 
-Raw data sources (in `data/raw/`, plus fineweb shard 000 and smol-smoltalk reused from v1's `dataset/raw_en/`):
-HuggingFaceFW/fineweb-edu sample-10BT (000, 001), HuggingFaceTB/smollm-corpus cosmopedia-v2 (2 shards),
-HuggingFaceTB/finemath finemath-4plus (3 shards), Nan-Do/code-search-net-python, HuggingFaceH4/ultrafeedback_binarized,
+Details: [DATA.md](DATA.md). Raw data sources (in `data/raw/`, plus fineweb shard 000 and smol-smoltalk reused from v1's `dataset/raw_en/`):
+HuggingFaceFW/fineweb-edu sample-10BT (000, 001, 002), HuggingFaceTB/smollm-corpus cosmopedia-v2 (2 shards),
+HuggingFaceTB/finemath finemath-4plus (3 shards), Nan-Do/code-search-net-python + Avelina/python-edu-cleaned (1 shard), HuggingFaceH4/ultrafeedback_binarized,
 eval sets Rowan/hellaswag, allenai/ai2_arc, baber/piqa.

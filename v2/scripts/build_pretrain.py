@@ -26,13 +26,14 @@ import pyarrow.parquet as pq
 from common import BOS, EOS, DATA_BIN, DATA_RAW, PRETRAIN_SEQ, V1_ROOT, load_tokenizer
 
 VAL_ROWS = 256
-# caps are generous upper bounds for a ~3B-token run (48 h of the 152M model); tokenizing stops at the cap
+# caps are upper bounds for a ~3B-token run (48 h of the 152M model); tokenizing stops at the cap.
+# cosmo/math/code caps are above what their downloaded shards hold, i.e. those pools use every document.
 SOURCES = {
-    'fineweb':    dict(cap=2.30e9),
-    'fineweb_hq': dict(cap=0.20e9),
-    'cosmo':      dict(cap=0.40e9),
-    'math':       dict(cap=0.30e9),
-    'code':       dict(cap=0.15e9),
+    'fineweb':    dict(cap=3.30e9),
+    'fineweb_hq': dict(cap=0.40e9),
+    'cosmo':      dict(cap=0.80e9),
+    'math':       dict(cap=0.65e9),
+    'code':       dict(cap=0.45e9),
 }
 MAIN_MIX = {'fineweb': 0.70, 'cosmo': 0.15, 'math': 0.10, 'code': 0.05}
 HQ_MIX = {'fineweb_hq': 0.50, 'cosmo': 0.20, 'math': 0.20, 'code': 0.10}
@@ -61,8 +62,11 @@ def doc_streams(only):
         yield 'cosmo', d['text']
     for d in (iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'HuggingFaceTB__finemath/finemath-4plus/*.parquet'))), ['text']) if 'math' in only else []):
         yield 'math', d['text']
+    # code: CodeSearchNet functions, then python-edu whole files (all edu score >= 4; the pool's tail = val rows)
     for d in (iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'Nan-Do__code-search-net-python/data/*.parquet'))), ['original_string']) if 'code' in only else []):
-        yield 'code', d['original_string']
+        yield 'code', [t.replace('\r\n', '\n') for t in d['original_string']]
+    for d in (iter_docs(sorted(glob.glob(os.path.join(DATA_RAW, 'Avelina__python-edu-cleaned/data/*.parquet'))), ['text']) if 'code' in only else []):
+        yield 'code', [t.replace('\r\n', '\n') for t in d['text']]
 
 
 def tokenize(only):

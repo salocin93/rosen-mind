@@ -1,14 +1,14 @@
 {
- "weights": "/home/nrosen/minimind/out/pretrain_768.pth",
+ "weights": "/home/nrosen/RosenMind/out/pretrain_768.pth",
  "arch": "v1",
- "time": "2026-11-16 14:19:23",
+ "time": "2026-11-21 19:56:58",
  "val": {
-  "fineweb": 3.2017,
-  "fineweb_hq": 3.0686,
-  "cosmo": 3.1618,
-  "math": 3.3576,
-  "code": 4.2234,
-  "mean": 3.4026
+  "fineweb": 3.0183,
+  "fineweb_hq": 3.0994,
+  "cosmo": 3.2007,
+  "math": 3.2924,
+  "code": 4.0018,
+  "mean": 3.3225
  },
  "hellaswag": {
   "acc": 0.2749452300338578,

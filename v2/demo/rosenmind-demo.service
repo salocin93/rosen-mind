@@ -2,7 +2,7 @@
 # Install:  sudo cp v2/demo/rosenmind-demo.service /etc/systemd/system/ && sudo systemctl daemon-reload
 #           sudo systemctl enable --now rosenmind-demo
 # Logs:     journalctl -u rosenmind-demo -f
-# To switch to v2 later, change ROSENMIND_WEIGHTS/ROSENMIND_ARCH below, then: sudo systemctl daemon-reload && sudo systemctl restart rosenmind-demo
+# Serves v2 (dpo_v2). To switch models, change ROSENMIND_WEIGHTS/ROSENMIND_ARCH below (v1: out/full_sft_768.pth + v1), then: sudo systemctl daemon-reload && sudo systemctl restart rosenmind-demo
 [Unit]
 Description=RosenMind chat demo
 After=network-online.target
@@ -11,8 +11,8 @@ Wants=network-online.target
 [Service]
 User=nrosen
 WorkingDirectory=/home/nrosen/RosenMind
-Environment=ROSENMIND_WEIGHTS=/home/nrosen/RosenMind/out/full_sft_768.pth
-Environment=ROSENMIND_ARCH=v1
+Environment=ROSENMIND_WEIGHTS=/home/nrosen/RosenMind/v2/out/dpo_v2.pth
+Environment=ROSENMIND_ARCH=v2
 Environment=ROSENMIND_DEVICE=cpu
 Environment=ROSENMIND_THREADS=2
 # reply length: up to ROSENMIND_MAX_NEW tokens, prompt + reply within ROSENMIND_CONTEXT (v1 was fine-tuned on <=768, v2 on 1024)
